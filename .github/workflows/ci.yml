@@ -1,0 +1,64 @@
+name: CI
+
+# Only the tests that need nothing beyond Node run here.
+#
+# tests/e2e.test.mjs and tests/live-render.mjs drive the real plugin inside a
+# live Cordis context, which means the dsh runtime (@deepseek-ai/dsh-*) and a
+# Chrome headless shell. Neither is published to npm, so those stay local:
+#
+#   node --test tests/e2e.test.mjs        # needs dsh installed
+#   node tests/live-render.mjs            # needs dsh + headless shell, renders
+#
+# What runs here is the bulk of the logic -- the composition contract checks and
+# the profile installer.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 20 is the floor declared in package.json engines.
+        node: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Tests (no dsh runtime required)
+        run: node --test tests/plugin.test.mjs tests/install.test.mjs
+
+      - name: CLI help exits cleanly
+        run: node scripts/install.mjs --help
+
+      - name: Unknown profile is reported, not created
+        run: |
+          if node scripts/install.mjs --profile no-such-profile --dry-run; then
+            echo "expected a non-zero exit for an unknown profile" >&2
+            exit 1
+          fi
+
+      - name: Installer is idempotent and reversible in a throwaway DSH_HOME
+        run: |
+          set -euo pipefail
+          HOME_DIR="$(mktemp -d)"
+          PROFILE="$HOME_DIR/profiles/ci"
+          mkdir -p "$PROFILE"
+          printf '%s\n' '{"name":"p","private":true,"dsh":{"profile":{"bundles":["@deepseek-ai/dsh-base"]}}}' > "$PROFILE/package.json"
+          printf '%s\n' '# pre-existing content' > "$PROFILE/cordis.patch.yml"
+          cp "$PROFILE/cordis.patch.yml" /tmp/before.yml
+
+          DSH_HOME="$HOME_DIR" node scripts/install.mjs --profile ci
+          DSH_HOME="$HOME_DIR" node scripts/install.mjs --profile ci   # must be a no-op
+          DSH_HOME="$HOME_DIR" node scripts/install.mjs --profile ci --uninstall
+
+          diff /tmp/before.yml "$PROFILE/cordis.patch.yml"
+          echo "uninstall restored the original file exactly"

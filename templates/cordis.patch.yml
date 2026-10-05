@@ -1,0 +1,131 @@
+# >>> dsh-tool-hyperframes >>> managed by scripts/install.mjs
+#
+# Appended verbatim to a dsh profile's cordis.patch.yml. Kept as its own file
+# so it can be reviewed and diffed: the YAML is long and easy to get subtly
+# wrong by hand. Everything between the >>> and <<< markers belongs to the
+# installer and is replaced or removed as a unit -- edit it here, not in the
+# profile.
+#
+# ⚠️ Both rows live under ONE `- insert:` key. Two things that break here:
+#
+#   * A bare `- id:` row is an *override*, not an addition. It is dropped with
+#     `patch: entry "<id>" not found` unless a bundle already contributed that
+#     id -- and dropped silently, with no error. `insert` always adds.
+#   * Every entry under `insert:` must use the SAME indentation (4 spaces here,
+#     one level below the `- insert:` key). A row that slips back to 2 spaces
+#     fails with `bad indentation of a sequence entry`. Blank lines and `#`
+#     comments between entries are fine -- verified, not assumed.
+#
+# `config.projectRoot` is evaluated in the harness process, so it resolves to
+# wherever dsh was launched: output lands in <cwd>/videos/. There is
+# deliberately no `cliRoot` -- the plugin discovers the CLI itself (deployment
+# config -> sibling install -> PATH). Add one only to short-circuit that probe.
+
+- insert:
+    - id: tool-hyperframes
+      name: 'dsh-tool-hyperframes'
+      config:
+        projectRoot: !!js "process.getBuiltinModule('node:path').join(process.cwd(), 'videos')"
+        previewPort: 3002
+
+    # "视频制作模式" — a session preset. A preset is pure declaration: an id,
+    # display metadata, and the child plugins the session composes. The tools
+    # are the shipped ones; only the persona differs from a standard session.
+    - id: preset-video
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: video
+        name: 视频制作模式
+        description: 用 HTML 写动画、HyperFrames 逐帧渲染成 MP4
+        order: 5
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: >-
+                你是一个视频制作 Agent。工作目录是 {{cwd}}。链路固定为
+                脚本 → 画面 → 配音 → 字幕 → 成片，每一步都要落盘可编辑的文件，
+                不要只在对话里描述。
+              suffix: >-
+                画面用 HyperFrames。有六条硬规则，违反任何一条都会渲染成静止画面或空画面：
+                (1) 场景是子组合，内容必须包在 <template> 里；index.html 用
+                data-composition-src="compositions/scene-NN.html" 挂载它。挂载宿主元素要同时有
+                data-composition-id 和自己的 id，而且 data-composition-id 必须用场景自己的名字
+                （如 "scene-01"），不能和场景内部用的 "main" 撞——撞了 hyperframes 会把它当成
+                同名嵌套组合、重映射成 main__hf1，然后死等一个永远不注册的 timeline id，
+                白等 45 秒（实测同一支 2 秒片子：撞 id 要 1 分 45 秒，不撞只要 15 秒）。
+                (2) 根元素必须有 data-composition-id（固定用 "main"，不是项目名）、data-width、
+                data-height，而且它自己也是一个 timed clip：data-start="0" 加
+                data-duration=总秒数，这是整段视频的时长来源；
+                (3) 每个有时序的元素必须同时有 class="clip"、data-start（从项目起点算起的秒数）、
+                data-duration（可见时长）、data-track-index 和 id（Studio 需要稳定编辑目标）；
+                (4) GSAP timeline 必须用 { paused: true } 创建，并注册到
+                window.__timelines["main"]，只写 paused 不注册，渲染器找不到它；
+                (5) 动画必须可 seek——渲染器按 frame = floor(时间 × fps) 逐帧索要画面，
+                不是录屏，所以禁止 setTimeout / setInterval / requestAnimationFrame 驱动动画。
+                (6) ⚠️ GSAP timeline 必须写在 index.html 里，绝对不能放在 <template> 子组合中。
+                放错位置的话渲染会 exit 0、MP4 正常，但每一帧都是同一张静止图——
+                linter 和静态检查都发现不了，只有抽帧比对才能暴露。
+                写完场景调 video_write_scene 看它报不报问题（它会自动重挂 index.html）；
+                渲染前用 video_list_scenes 复查，再用 video_check 跑官方校验。
+                ⚠️ 渲染完必须验帧，不能只看退出码：用 ffprobe 取总帧数，再按比例在
+                片头/1-4/中间/3-4/片尾各抽一帧算 md5。判据是「不是全同」，不是「至少 3 个不同」
+                ——真实动画常只在前段动，5 帧里只有 2~3 种不同是常态，阈值定高会误判成静帧。
+                工具链问题跑 video_doctor，那是最准的：ffmpeg 之外还必须有
+                Chrome headless shell，缺了它 check 和 render 都会失败。
+
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+
+          - id: tool-hyperframes
+            name: 'dsh-tool-hyperframes'
+
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+
+          - id: tool-subagent-control
+            name: '@deepseek-ai/dsh-tool-subagent-control'
+
+          - id: tool-subagent
+            name: '@deepseek-ai/dsh-tool-subagent'
+            config:
+              provider: spawn
+              toolName: subagent
+              backgroundMode: continuable
+
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+
+# <<< dsh-tool-hyperframes <<<

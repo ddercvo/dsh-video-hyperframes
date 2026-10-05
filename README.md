@@ -10,20 +10,56 @@
 
 ## 安装
 
-前置：**Node 20+**、**ffmpeg**、**Chrome headless shell**（后两个见下面「工具链」）。
+前置：**Node 20.11+**、**ffmpeg**、**Chrome headless shell**
+（后两个见下面「三个实测到的坑」）。
 
 ```bash
 git clone https://github.com/ddercvo/dsh-video-hyperframes.git
 cd dsh-video-hyperframes
-pnpm install          # link: 是 pnpm 语法，npm install 会报 EUNSUPPORTEDPROTOCOL
+pnpm install                # link: 是 pnpm 语法；npm install 会报 EUNSUPPORTEDPROTOCOL
+node scripts/install.mjs    # 注册进 dsh profile
 ```
 
-然后在**你的 dsh profile** 里（`$DSH_HOME/profiles/<profile>/`）声明依赖、
-挂工具行——细节见下面[「接入 dsh profile」](#接入-dsh-profile)。
+`install.mjs` 会改 profile 的 `package.json`（加依赖 + bundle）和
+`cordis.patch.yml`（挂工具行 + preset），**两个文件改前都各自备份**成
+`<文件名>.bak-<时间戳>`。重复跑是幂等的；`--uninstall` 会把文件还原成安装前的样子
+（逐字节一致，有测试守着）。
 
-前置三件套：**Node 20+**、**ffmpeg**、**Chrome headless shell**
-（后两个见下面「三个实测到的坑」）。想先验证工具链，跑 `video_doctor`
-或 `video_env_check`——它们会直接告诉你缺什么、改哪。
+| 参数 | 作用 |
+| --- | --- |
+| `--profile <name>` | 目标 profile，默认 `desktop` |
+| `--dry-run` | 只打印计划，不写任何文件 |
+| `--uninstall` | 移除插件，还原两个文件 |
+| `--help` | 用法 |
+
+然后三步生效：
+
+1. `cd $DSH_HOME/profiles/<profile> && pnpm install`
+2. **重启 dsh**
+3. **开新会话** —— preset 是会话级不可变的（`agent-preset/locked`），
+   老会话里不会出现「视频制作模式」
+
+装完跑一次 `video_doctor` 或 `video_env_check` 验证工具链。
+
+<details>
+<summary>为什么要有这个脚本：手改会踩两个静默失败</summary>
+
+**1. `cordis.patch.yml` 里的行必须写在 `- insert:` 下面。**
+
+顶层裸 `- id:` 是**覆盖**语义 —— 只有当某个 bundle 已经贡献了同名 id 时才保留。
+否则 dsh 打一行 `patch: entry "<id>" not found` 就把整行丢掉，**不报错**。
+`insert` 是无条件添加。另外 `insert` 下每个条目缩进必须一致（本仓库用 4 空格），
+某行退回 2 空格会 `bad indentation of a sequence entry`。
+（空行和注释在列表里**没问题** —— 实测过，不是猜的。）
+
+**2. `package.json` 的依赖必须用 `link:` 协议，且要同时进 `bundles`。**
+
+裸路径会被 pnpm 当成 registry 上的包名；只写 `dependencies` 不进 `dsh.profile.bundles`
+的话，包能解析但**插件永远不会被加载**。
+
+脚本把这两件事一起做了，并打印它改了什么。
+
+</details>
 
 ## 七个工具
 
@@ -146,7 +182,10 @@ md5sum f*.png    # 全部相同 = timeline 没被 seek
 **时序元素还要有 `id`**（`studio_missing_editable_id`）。没有 `id`，Studio 的时间轴和
 画布控件找不到稳定编辑目标。
 
-## 接入 dsh profile
+## 手动接入（`install.mjs` 做的事）
+
+平时不用看这节 —— `node scripts/install.mjs` 会自动完成。这里留作参考，
+以及脚本跑不了时（比如 profile 布局不标准）的手改依据。
 
 profile 里声明：
 
@@ -157,20 +196,22 @@ profile 里声明：
 }
 ```
 
-`cordis.patch.yml` 里挂工具行，并引入「视频制作模式」preset。
-
-**两个 id 必须写在 `- insert:` 列表里**，这是官方 preset 用的形式：
+`cordis.patch.yml` 里追加一段。**完整内容见
+[`templates/cordis.patch.yml`](templates/cordis.patch.yml)** —— 直接复制粘贴那整份，
+它是安装脚本用的同一个模板（含 `>>>` / `<<<` 标记，脚本靠标记做精确卸载）。
+形状是这样：
 
 ```yaml
+# >>> dsh-tool-hyperframes >>> managed by scripts/install.mjs
+
 - insert:
     - id: tool-hyperframes
       name: 'dsh-tool-hyperframes'
       config:
-        # 产出落在会话的工作目录下的 videos/
+        # 产出落在会话工作目录下的 videos/
         projectRoot: !!js "process.getBuiltinModule('node:path').join(process.cwd(), 'videos')"
         previewPort: 3002
-        # 指向你本地的 hyperframes CLI 安装位置（下面写的是 npx 缓存里的那份）
-        cliRoot: !!js "process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:os').homedir(), 'AppData', 'Local', 'npm-cache', '_npx', '<hash>', 'node_modules', '@deepseek-ai', 'hyperframes')"
+        # 可不写 —— 插件自己会找 CLI（部署配置 → 同级安装 → PATH）
     - id: preset-video
       name: '@deepseek-ai/dsh-agent-preset'
       config:
@@ -243,19 +284,33 @@ curl -L -C - --retry 10 --retry-delay 3 --retry-all-errors \
 ## 开发
 
 ```bash
-node scripts/build.mjs                      # src/*.js 是纯 ESM，构建只是拷到 lib/
-node --test tests/plugin.test.mjs tests/e2e.test.mjs   # 23 个测试
-node tests/live-render.mjs                   # 真实端到端：建项目→linter→渲染→抽帧比对
+node scripts/build.mjs                       # src/*.js 是纯 ESM，构建只是拷到 lib/
+node --test tests/plugin.test.mjs tests/install.test.mjs   # 不需要 dsh 运行时
+node --test tests/e2e.test.mjs               # 需要 dsh 运行时
+node tests/live-render.mjs                   # 真实出片：建项目→linter→渲染→抽帧比对
 node scripts/validate-patch.mjs <patch.yml>  # 用 dsh 自己的解析器验 patch
+node scripts/install.mjs --dry-run           # 打印安装计划，不写文件
 ```
 
-测试分三层：`tests/plugin.test.mjs`（22 个）用桩 `ctx.tools` 测逻辑与契约检查，
-`tests/e2e.test.mjs`（1 个）在**真实 Cordis 上下文**里挂载并跑完整项目生命周期，
-`tests/live-render.mjs` **真的调 CLI 出片**并验证帧在动。
-后两者都需要 headless shell。
+测试分四层，**只有前两层能在 CI 里跑**（[`.github/workflows/ci.yml`](.github/workflows/ci.yml)）：
+
+| 文件 | 数量 | 依赖 | CI |
+| --- | --- | --- | --- |
+| `tests/plugin.test.mjs` | 22 | 无（桩 `ctx.tools`） | ✅ |
+| `tests/install.test.mjs` | 14 | 无（纯函数 + 临时目录） | ✅ |
+| `tests/e2e.test.mjs` | 1 | dsh 运行时（真实 Cordis 上下文） | ❌ |
+| `tests/live-render.mjs` | — | dsh + headless shell，会真的渲染 | ❌ |
+
+后两层跑不了 CI 的原因：`@deepseek-ai/dsh-*` 系列没有发布到 npm，CI 里装不上。
+它们在本地守着最后一道防线 —— `live-render.mjs` 会**抽帧算哈希**，
+渲染成静止图时直接失败（这是唯一能发现第 9 条契约违规的方法）。
 
 `e2e` 需要 `dsh-system-prompt`（`ToolRuntime` 声明了 `inject: ['systemPrompt']`，
 少一个服务 fiber 就停在半路，`ctx.tools` 是 undefined）。
+
+`install.mjs` 的逻辑放在 `scripts/lib/profile-install.mjs` 里，是纯函数，
+测试直接调用而不起子进程 —— **本机沙箱下 Node spawn 会 EBUSY**，
+起子进程的测试根本跑不起来。
 
 `validate-patch.mjs` 分两层：第一层调 dsh 自己的 `--dump-config` 解析 patch
 （能抓到 YAMLException 和被静默丢弃的行），第二层才做结构报告和 `!!js` 语法检查。

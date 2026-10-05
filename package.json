@@ -30,12 +30,19 @@
     "lib/toolchain.js",
     "lib/types/**/*.d.ts",
     "src",
+    "scripts",
+    "templates",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
+    "install-plugin": "node scripts/install.mjs",
+    "uninstall-plugin": "node scripts/install.mjs --uninstall",
     "test": "node --test tests/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20.11"
   },
   "license": "MIT",
   "peerDependencies": {
