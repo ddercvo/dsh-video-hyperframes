@@ -354,15 +354,19 @@ test('video_env_check reports the toolchain state', async () => {
 test('video_render refuses to start without the headless shell', async () => {
   const { byName, cleanup } = mount()
   await byName.video_new_project.execute({ name: 'demo', duration: 10, width: 1920, height: 1080 }, {})
-  // Only meaningful when the shell is genuinely absent from this machine.
+  // Only meaningful when the toolchain is genuinely incomplete on this machine.
   const env = await byName.video_env_check.execute({}, {})
   if (env.canRender) {
     cleanup()
     return
   }
+  // Which piece is missing depends on the machine: a dev box usually has the
+  // CLI but no headless shell, while CI has neither. The behaviour under test
+  // is the same either way -- refuse up front instead of stalling for minutes
+  // on a render that cannot succeed.
   await assert.rejects(
     () => byName.video_render.execute({ project: 'demo', output: 'out.mp4' }, {}),
-    /headless shell/i,
+    /headless shell|CLI not found/i,
   )
   cleanup()
 })
