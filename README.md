@@ -12,8 +12,12 @@
 
 ## 安装
 
+> 🤖 **让 agent 帮你装？** 把 [`AGENTS.md`](AGENTS.md) 给它 —— 那份文件写清了
+> agent 能自动完成什么、**哪两步只能由人来做**（重启 dsh、开新会话），
+> 以及怎么验证。下面这份是给人看的。
+
 前置：**Node 20.11+**、**ffmpeg**、**Chrome headless shell**
-（后两个见下面「三个实测到的坑」）。
+（后两个见下面「实测到的坑」）。
 
 ```bash
 git clone https://github.com/ddercvo/dsh-video-hyperframes.git
@@ -269,30 +273,44 @@ cd ~/.dsh/tools/hyperframes && npm install --ignore-scripts
 `--ignore-scripts` 是为了绕开 esbuild 的 postinstall —— 它会 spawnSync 校验二进制，
 managed node.exe 被占用时直接 `EBUSY`，而二进制本来就随包下来了，脚本只做版本验证。
 
-## 三个实测到的坑
+## 实测到的坑
 
-**ffmpeg 不在 PATH**。它来自 WinGet 包目录，安装器没写进 PATH。
-`src/toolchain.js` 的 `findExecutable()` 会先查 PATH，再扫
-`%LOCALAPPDATA%\Microsoft\WinGet\Packages`（深度 3），所以裸 `ffmpeg` 也能跑通。
-实测定位到的是这类路径（`Gyan.FFmpeg_...` 开头的包目录）：
-
-```
-%LOCALAPPDATA%\Microsoft\WinGet\Packages\Gyan.FFmpeg_..._8wekyb3d8bbwe\ffmpeg-9.0.2-full_build\bin\ffmpeg.exe
-```
+**ffmpeg 不在 PATH（Windows 特有）**。WinGet 装的 ffmpeg 不会写进 PATH，
+包在 `%LOCALAPPDATA%\Microsoft\WinGet\Packages` 下。`src/toolchain.js` 的
+`findExecutable()` 会先查 PATH、再扫那个目录（深度 3），所以裸 `ffmpeg`
+也能跑通。macOS / Linux 通过包管理器装的通常在 PATH 上，不需要这一步。
 
 **Chrome headless shell 要单独下，ffmpeg 装了不代表能渲染**。`check` / `render`
-都依赖它。`hyperframes browser ensure` 在本机只有 ~59 KB/s，而且**不支持断点续传**
-（内部走 puppeteer `install()` 写进全新 staging 目录，中断就白下）。curl 官方源快一倍多：
+都依赖它（约 130MB）。
+
+最省事的办法是 `hyperframes browser ensure` —— 跨平台，自己判断版本和架构。
+但它**不支持断点续传**，本机实测只有 ~59 KB/s，中断就白下。
+
+想快就用 curl 直连官方源（**支持续传**）。平台名和 `process.platform` 不同，
+macOS 还要按架构分：
+
+| 平台 | Chrome for Testing 名 |
+| --- | --- |
+| Windows x64 | `win64` |
+| macOS Apple Silicon | `mac-arm64` |
+| macOS Intel | `mac-x64` |
+| Linux x64 | `linux64` |
 
 ```bash
+# 版本取 https://googlechromelabs.github.io/chrome-for-testing/ 里的当前 stable
+PLATFORM=linux64
+VERSION=<当前 stable 版本>
 mkdir -p ~/.cache/hyperframes/chrome && cd ~/.cache/hyperframes/chrome
-curl -L -C - --retry 10 --retry-delay 3 --retry-all-errors \
-  -o chrome-headless-shell-152.0.7977.30.zip \
-  "https://storage.googleapis.com/chrome-for-testing-public/152.0.7977.30/win64/chrome-headless-shell-win64.zip"
+curl -L -C - --retry 10 --retry-delay 3 --retry-all-errors -o shell.zip \
+  "https://storage.googleapis.com/chrome-for-testing-public/$VERSION/$PLATFORM/chrome-headless-shell-$PLATFORM.zip"
+unzip shell.zip
 ```
 
-解压到 `~/.cache/hyperframes/chrome/chrome-headless-shell/win64-152.0.7977.30/`，
-`toolchain.js` 的 `findHeadlessShell()` 会发现它并注入 `HYPERFRAMES_BROWSER_PATH`。
+解压到 `~/.cache/hyperframes/chrome/chrome-headless-shell/` 下**任意子目录**都行 ——
+`findHeadlessShell()` 是搜索发现的，不看目录名。
+
+懒得手动填的话，跑 `video_env_check` 或 `video_doctor`，它们会**按当前平台**
+给出确切命令（版本号和平台都填好了）。
 
 **不要拿普通 Chromium 顶替**。`HYPERFRAMES_BROWSER_PATH` 指向 Playwright 的 Chromium
 会被接受，`browser_probe` 甚至能过（37ms）——但渲染会卡死在 Puppeteer profile 锁上，

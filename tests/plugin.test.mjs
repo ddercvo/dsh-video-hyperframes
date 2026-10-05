@@ -11,7 +11,7 @@ import { mkdtempSync, statSync, rmSync, existsSync, readFileSync, writeFileSync 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const { apply, inject, name } = await import('../lib/index.js')
+const { apply, inject, installHints, name } = await import('../lib/index.js')
 
 /** Minimal stand-in for ctx.tools that records what the plugin registers. */
 function fakeRegistry() {
@@ -439,4 +439,31 @@ test('video_render refuses to start without the headless shell', async () => {
     /headless shell|CLI not found/i,
   )
   cleanup()
+})
+
+// --- install hints ---------------------------------------------------------------
+//
+// Everything here used to be Windows-only: video_env_check told a Linux or macOS
+// user to run `winget` and handed them a win64 download URL, and the URL also
+// carried a pinned version that would eventually 404. Both are wrong answers
+// delivered with confidence, which is worse than no answer.
+
+test('install hints name the right package manager for each platform', () => {
+  assert.match(installHints('win32', 'x64').ffmpeg, /winget/)
+  assert.match(installHints('darwin', 'arm64').ffmpeg, /brew/)
+  assert.match(installHints('linux', 'x64').ffmpeg, /apt/)
+})
+
+test('an unrecognised platform gets no command rather than a wrong one', () => {
+  const hints = installHints('freebsd', 'x64')
+  assert.equal(hints.ffmpeg, null)
+  assert.equal(hints.chromePlatform, null)
+})
+
+test('Chrome for Testing platform names, including the macOS architecture split', () => {
+  assert.equal(installHints('win32', 'x64').chromePlatform, 'win64')
+  assert.equal(installHints('linux', 'x64').chromePlatform, 'linux64')
+  // Chrome for Testing distinguishes macOS by architecture; process.platform does not.
+  assert.equal(installHints('darwin', 'arm64').chromePlatform, 'mac-arm64')
+  assert.equal(installHints('darwin', 'x64').chromePlatform, 'mac-x64')
 })

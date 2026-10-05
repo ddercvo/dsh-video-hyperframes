@@ -349,6 +349,41 @@ function inspectMounts(dir, scenes) {
 }
 
 /**
+ * Platform-specific install commands for the parts of the toolchain that are
+ * missing.
+ *
+ * These were hardcoded to Windows -- `winget`, and a win64 download URL -- so a
+ * Linux or macOS user running video_env_check was handed instructions that
+ * could not work. Chrome for Testing also names its platforms differently from
+ * `process.platform`, and splits macOS by architecture.
+ *
+ * Deliberately no version numbers: a pinned one goes stale and then the command
+ * fails in a way that reads as "the download is broken" rather than "the URL is
+ * old". The caller points at the version index instead.
+ *
+ * @param platform - a `process.platform` value.
+ * @param arch - a `process.arch` value.
+ * @returns the commands that apply; null where there is nothing useful to say.
+ */
+function installHints(platform, arch) {
+  const ffmpeg = {
+    win32: 'winget install Gyan.FFmpeg',
+    darwin: 'brew install ffmpeg',
+    linux: "sudo apt install ffmpeg    # or this distro's equivalent",
+  }[platform] ?? null
+
+  const chromePlatform = platform === 'win32'
+    ? 'win64'
+    : platform === 'darwin'
+      ? (arch === 'arm64' ? 'mac-arm64' : 'mac-x64')
+      : platform === 'linux'
+        ? 'linux64'
+        : null
+
+  return { ffmpeg, chromePlatform }
+}
+
+/**
  * Register the video production tools on `ctx.tools`.
  * @param ctx - registrant context carrying the tool registry.
  * @param config - deployment paths and ports.
@@ -405,16 +440,24 @@ function apply(ctx, config) {
       const cli = resolveCli(config)
       const ffmpeg = config.ffmpegPath ?? findExecutable('ffmpeg') ?? null
       const browser = process.env.HYPERFRAMES_BROWSER_PATH ?? findHeadlessShell()
+      const { ffmpeg: ffmpegCmd, chromePlatform } = installHints(process.platform, process.arch)
       const hints = []
       if (!cli) hints.push('install it: cd ~/.dsh/tools/hyperframes && npm install --ignore-scripts')
-      if (!ffmpeg) hints.push('install it: winget install Gyan.FFmpeg')
+      if (!ffmpeg) {
+        hints.push(ffmpegCmd
+          ? `install it: ${ffmpegCmd}`
+          : "install ffmpeg with this platform's package manager: https://ffmpeg.org/download.html")
+      }
       if (!browser) {
-        hints.push('hyperframes check and render need the Chrome headless shell (~130MB). Download it directly — `hyperframes browser ensure` does not resume and runs at half the speed:')
-        hints.push('  mkdir -p ~/.cache/hyperframes/chrome && cd ~/.cache/hyperframes/chrome')
-        hints.push('  curl -L -C - --retry 10 --retry-all-errors -o chrome-headless-shell-152.0.7977.30.zip \\')
-        hints.push('    "https://storage.googleapis.com/chrome-for-testing-public/152.0.7977.30/win64/chrome-headless-shell-win64.zip"')
-        hints.push('  then unzip it to ~/.cache/hyperframes/chrome/chrome-headless-shell/win64-152.0.7977.30/')
-        hints.push('Do NOT point HYPERFRAMES_BROWSER_PATH at a regular Chromium/Chrome: those builds ignore the --version probe HyperFrames uses, and rendering stalls on a Puppeteer profile lock.')
+        hints.push('hyperframes check and render need the Chrome headless shell (~130MB). Do NOT point HYPERFRAMES_BROWSER_PATH at a regular Chromium/Chrome: those builds ignore the --version probe HyperFrames uses, and rendering stalls on a Puppeteer profile lock.')
+        hints.push('Easiest, and cross-platform: `hyperframes browser ensure`. It cannot resume a partial download and runs at roughly half speed.')
+        if (chromePlatform) {
+          hints.push(`Faster for ${chromePlatform}: fetch it with curl, which resumes. Get the current stable version from https://googlechromelabs.github.io/chrome-for-testing/ (the "chrome-headless-shell" entry for ${chromePlatform}):`)
+          hints.push('  mkdir -p ~/.cache/hyperframes/chrome && cd ~/.cache/hyperframes/chrome')
+          hints.push('  curl -L -C - --retry 10 --retry-all-errors -o shell.zip \\')
+          hints.push(`    "https://storage.googleapis.com/chrome-for-testing-public/<version>/${chromePlatform}/chrome-headless-shell-${chromePlatform}.zip"`)
+          hints.push(`  then unzip it anywhere under ~/.cache/hyperframes/chrome/chrome-headless-shell/ — that directory is searched, so the name does not matter.`)
+        }
       }
       return {
         node: process.version,
@@ -780,4 +823,4 @@ function apply(ctx, config) {
   }))
 }
 
-export { Config, apply, inject, name, toolchainEnv }
+export { Config, apply, inject, installHints, name, toolchainEnv }

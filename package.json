@@ -33,6 +33,7 @@
     "scripts",
     "templates",
     "README.md",
+    "AGENTS.md",
     "LICENSE"
   ],
   "scripts": {
