@@ -13,7 +13,7 @@
 前置：**Node 20+**、**ffmpeg**、**Chrome headless shell**（后两个见下面「工具链」）。
 
 ```bash
-git clone https://github.com/lxy/dsh-video-hyperframes.git
+git clone https://github.com/ddercvo/dsh-video-hyperframes.git
 cd dsh-video-hyperframes
 pnpm install          # link: 是 pnpm 语法，npm install 会报 EUNSUPPORTEDPROTOCOL
 ```
