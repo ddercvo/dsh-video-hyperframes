@@ -1,24 +1,19 @@
 name: CI
 
-# The full suite needs the dsh runtime, which CI cannot have.
+# A plain `npm install` is enough: every package the tests need is on the public
+# registry, including the @deepseek-ai/* runtime, so nothing here is a stand-in.
 #
-# `@deepseek-ai/dsh-*` is supplied by the harness itself -- locally,
-# node_modules/@deepseek-ai/* are symlinks into dsh's own npx cache, not
-# registry installs. The version this plugin declares (dsh-tools 0.2.0-rc.2) is
-# not published at all.
+# This replaces an earlier version that hand-assembled the runtime with a stub
+# for @deepseek-ai/dsh-tools. That was built on a mistake worth recording: the
+# pinned version (0.2.0-rc.2) looked unpublished because
+# `npm view <pkg> version` prints the `latest` dist-tag, and a prerelease never
+# carries it. `npm view <pkg> versions` shows it. And the real reason the first
+# run failed was simpler still -- the workflow called the test runner without
+# installing anything first.
 #
-# So CI assembles what it can and runs the tests that stay meaningful:
+# Not covered here: tests/live-render.mjs. It renders an actual MP4 and needs a
+# Chrome headless shell, which CI has no reason to carry:
 #
-#   * the real @deepseek-ai/schemastery from npm
-#   * a minimal stub for @deepseek-ai/dsh-tools (tests/stubs/dsh-tools), which
-#     provides just enough for lib/index.js to load
-#
-# That covers the composition contract checks, the path guards and the profile
-# installer -- the plugin's own logic. What it does NOT cover: argument-schema
-# validation (the real defineTool does it; the stub does not) and anything in
-# tests/e2e.test.mjs or tests/live-render.mjs. Run those locally:
-#
-#   node --test tests/e2e.test.mjs
 #   node tests/live-render.mjs
 
 on:
@@ -42,23 +37,13 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
 
-      - name: Assemble what CI can of the dsh runtime
-        run: |
-          set -euo pipefail
-          # --legacy-peer-deps keeps npm from trying to satisfy the plugin's
-          # peerDependencies, one of which does not exist on the registry.
-          npm install --no-save --no-package-lock --legacy-peer-deps \
-            '@deepseek-ai/schemastery@~3.18.4'
-          # The stub is placed directly rather than installed: npm treats it as
-          # a peer, and --legacy-peer-deps tells npm to skip peers entirely.
-          mkdir -p node_modules/@deepseek-ai
-          cp -r tests/stubs/dsh-tools node_modules/@deepseek-ai/dsh-tools
-          # Top-level await is a syntax error under `node -e` (CommonJS), so use
-          # the promise form.
-          node -e "import('@deepseek-ai/dsh-tools').then(() => console.log('runtime pieces present'))"
+      - name: Install dependencies
+        # --no-package-lock: this repo is pnpm-managed, and a stray npm lockfile
+        # would be noise that could disagree with pnpm-lock.yaml.
+        run: npm install --no-package-lock
 
       - name: Tests
-        run: node --test tests/plugin.test.mjs tests/install.test.mjs
+        run: npm test
 
       - name: CLI help exits cleanly
         run: node scripts/install.mjs --help

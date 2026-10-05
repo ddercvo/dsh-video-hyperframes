@@ -314,30 +314,32 @@ node scripts/validate-patch.mjs <patch.yml>  # 用 dsh 自己的解析器验 pat
 node scripts/install.mjs --dry-run           # 打印安装计划，不写文件
 ```
 
-测试分四层，前两层在 CI 里跑（[`.github/workflows/ci.yml`](.github/workflows/ci.yml)）：
+测试分四层，**前三层都在 CI 里跑**（[`.github/workflows/ci.yml`](.github/workflows/ci.yml)）：
 
 | 文件 | 数量 | 需要什么 | CI |
 | --- | --- | --- | --- |
-| `tests/plugin.test.mjs` | 22 | `lib/index.js` 能加载 → CI 里用 `tests/stubs/dsh-tools` | ✅ |
+| `tests/plugin.test.mjs` | 26 | 能加载 `lib/index.js` → 要 dsh 运行时 | ✅ |
 | `tests/install.test.mjs` | 15 | 无（纯函数 + 临时目录） | ✅ |
-| `tests/e2e.test.mjs` | 1 | dsh 运行时（真实 Cordis 上下文） | ❌ |
-| `tests/live-render.mjs` | — | dsh + headless shell，会真的渲染 | ❌ |
+| `tests/e2e.test.mjs` | 1 | dsh 运行时（真实 Cordis 上下文），**不渲染** | ✅ |
+| `tests/live-render.mjs` | — | dsh + headless shell，会真的渲染 MP4 | ❌ |
 
-**为什么 CI 需要 stub**：`lib/index.js` 在模块顶层 import dsh 运行时，缺了它
-整个文件加载失败 —— 连不碰 dsh 的测试也一起挂。而这些东西装不上：
-`node_modules/@deepseek-ai/*` 正常是 dsh 自己 npx 缓存的软链，
-`peerDependencies` 里钉的 `dsh-tools@0.2.0-rc.2` 根本没发布（registry 最新是 `0.0.1-rc.1`）。
+CI 里一个 `npm install` 就够：**测试要的包全在公共 registry 上**，
+包括 `@deepseek-ai/*` 那套运行时（`peerDependencies` 会一起装上）。
+装完 `npm test` 跑 42 个。
 
-CI 因此用 npm 上的真 `schemastery` + 一个最小 stub 补上 `dsh-tools`。
-**代价说清楚**：stub 不做参数 schema 校验（真的 `defineTool` 会做），
-所以"插件声明的 parameters 合法吗"只能由真实运行时回答。
-契约检查、路径守卫、各工具返回值这些都是插件自己的逻辑，跑的是真代码。
+> ⚠️ 这里踩过一个坑，记下来免得复犯：
+> `npm view @deepseek-ai/dsh-tools version` 只显示 **`latest` dist-tag**，
+> 而这个包钉的是 `0.2.0-rc.2` —— **预发布版本不打 latest 标签**，
+> 所以看起来"不存在"（显示 `0.0.1-rc.1`）。
+> 要查真实版本列表得用 `npm view <pkg> versions`。
+> 我当初据此以为装不上，还写了个 stub 顶上 —— 其实一直都在。
 
-后两层是本地防线 —— `live-render.mjs` 会**抽帧算哈希**，渲染成静止图时直接失败
-（这是唯一能发现第 9 条契约违规的方法）。
+只有 `live-render.mjs` 留在本地 —— 它会**抽帧算哈希**，渲染成静止图时直接失败
+（这是唯一能发现第 9 条契约违规的方法，需要 Chrome headless shell）。
 
 `e2e` 需要 `dsh-system-prompt`（`ToolRuntime` 声明了 `inject: ['systemPrompt']`，
-少一个服务 fiber 就停在半路，`ctx.tools` 是 undefined）。
+少一个服务 fiber 就停在半路，`ctx.tools` 是 undefined）——
+它作为传递依赖由 `npm install` 带上。
 
 `install.mjs` 的逻辑放在 `scripts/lib/profile-install.mjs` 里，是纯函数，
 测试直接调用而不起子进程 —— **本机沙箱下 Node spawn 会 EBUSY**，
