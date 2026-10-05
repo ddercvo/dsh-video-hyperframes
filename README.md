@@ -228,8 +228,9 @@ profile 里声明：
 否则打一行 `patch: entry "<id>" not found` 就把整行丢掉——**不报错**。
 `insert` 是无条件添加，不依赖 bundles 声明了什么。
 
-`insert` 列表里不能夹空行（YAML 会报 `bad indentation of a sequence entry`），
-所有条目必须连续。
+`insert` 下每个条目**缩进必须一致**（本仓库用 4 空格）。某行退回 2 空格会报
+`bad indentation of a sequence entry`。**空行和注释在列表里是合法的** —— 实测过。
+（一开始把那个报错归因于空行，是错的：真正的原因是缩进层级。）
 
 不需要 `agent-preset-registry` 行：`dsh-web-app` 已依赖
 `@deepseek-ai/dsh-agent-preset-registry`，registry 随 bundle 一起加载。
