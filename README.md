@@ -69,14 +69,15 @@ node scripts/install.mjs    # 注册进 dsh profile
 | --- | --- |
 | `video_env_check` | 报告 node / ffmpeg / hyperframes CLI / 项目根目录是否就绪 |
 | `video_new_project` | 建项目骨架：`hyperframes.json`、`meta.json`、`index.html`、`compositions/`、`assets/` |
-| `video_write_scene` | 写一个场景 HTML，并**当场做 9 类组合契约检查** |
+| `video_write_scene` | 写一个场景 HTML，并**当场做 10 类组合契约检查** |
 | `video_list_scenes` | 按数字序（不是字典序）列出场景与时序属性计数、契约违规数 |
 | `video_check` | 调官方 `hyperframes check`：lint + 运行时校验 + 无头 Chrome 布局检查 |
 | `video_doctor` | 调官方 `hyperframes doctor`：按 HyperFrames 自己的方式体检工具链 |
 | `video_render` | 调 `hyperframes render` 出 MP4，回传退出码、字节数、日志尾部 |
 
 `video_write_scene` 的契约检查是这个插件最有价值的部分——下面这些错误在预览里
-几乎看不出来，但会直接毁掉成片。**第 9 条最阴险**：
+几乎看不出来，但会直接毁掉成片。前 9 条只读场景文件，第 10 条要看 index.html
+（**第 9、10 条最阴险**，一个出静帧，一个白等 45 秒，都不报错）：
 
 1. 场景内容没包在 `<template>` 里
 2. 根元素没有 `data-composition-id`（必须是 `"main"`，不是项目名）
@@ -90,25 +91,21 @@ node scripts/install.mjs    # 注册进 dsh profile
 8. 时序元素没有 `id` → Studio 找不到稳定编辑目标
 9. **GSAP timeline 写在了场景文件里** → 渲染 `exit 0`、MP4 正常、linter 全绿，
    但**每一帧都是同一张静止图**。任何静态检查都发现不了
+10. **挂载宿主的 `data-composition-id` 和它挂载的场景内部用的 id 撞名** →
+   hyperframes 把宿主当成同名嵌套组合、重映射成 `main__hf1`，然后死等一个永远
+   不注册的 timeline id。**渲染不报错，只是白等 45 秒**
+   （实测同一支 2 秒片子：撞名 1 分 45 秒，不撞 15 秒）。
+   官方 lint 帮不上忙 —— 它的规则是「有 `data-composition-id` 就放行」，
+   只查字段存在、不查取值。这条只能靠插件自己读 index.html 比对
 
 <details>
-<summary>另外两条只有官方 lint 抓，以及一条谁都抓不到的</summary>
+<summary>另外两条只有官方 lint 抓</summary>
 
-**只有 `video_check`（官方 lint）会报的**：挂载宿主缺 `data-composition-id`
-（`host_missing_composition_id`）、宿主缺自己的 `id`（`studio_missing_editable_id`）。
+挂载宿主缺 `data-composition-id`（`host_missing_composition_id`）、
+宿主缺自己的 `id`（`studio_missing_editable_id`）。
 
-这两条**不在**上面那个列表里 —— `video_write_scene` 的检查只读场景文件
-（`inspectScene(dir, scene)`），不读 index.html，所以它看不到宿主编排。
-插件自己生成 index.html 时是对的，这两条只在你手改 index.html 时才可能踩到。
-
-**一条谁都抓不到的**：宿主的 `data-composition-id` 和场景内部注册 timeline 用的
-id **撞名**。官方 lint 的实现是「有 `data-composition-id` 就放行」，只查字段存在、
-不查取什么值；插件的检查又读不到 index.html。撞了之后 hyperframes 把宿主重映射成
-`main__hf1`，然后死等一个永远不注册的 timeline id —— **渲染不报错，只是白等 45 秒**
-（实测同一支 2 秒片子：撞名 1 分 45 秒，不撞 15 秒）。
-
-绕开的办法只有一个：别手写挂载宿主，让 `video_write_scene` 生成
-（它用的是 `data-composition-id="<场景名>"`）。
+插件只报**撞名**（第 10 条），不报**缺失**：缺了字段就没有可撞的值，
+而且官方 lint 已经把这两种情况都报出来了，重复一遍只会增加噪音。
 
 </details>
 
@@ -353,4 +350,6 @@ CI 因此用 npm 上的真 `schemastery` + 一个最小 stub 补上 `dsh-tools`�
 
 契约本身是实测校准的，不是读文档推测的——第 1/2/5 条（`<template>`、
 宿主的 composition-id、元素 `id`）都是被官方 linter 报出来才发现代码里没实现，
-第 9 条（timeline 不能放子组合）连 linter 都查不出，靠抽帧比对才暴露。
+第 9 条（timeline 不能放子组合）连 linter 都查不出，靠抽帧比对才暴露，
+第 10 条（宿主 id 撞名）是渲染慢得反常、顺着计时查出来的 —— 三条的发现路径都不一样，
+这也是为什么这份清单不照文档写。

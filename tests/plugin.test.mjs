@@ -7,7 +7,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, statSync, rmSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, statSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -204,6 +204,76 @@ test('video_list_scenes flags a broken scene', async () => {
   await byName.video_write_scene.execute({ project: 'p', scene: 'scene-01.html', html: '<div>bare</div>' }, {})
   const out = await byName.video_list_scenes.execute({ project: 'p' }, {})
   assert.equal(out.brokenCount, 1)
+  cleanup()
+})
+
+// --- mount-host id collisions ---------------------------------------------------
+//
+// The host's data-composition-id must differ from the id its scene registers a
+// timeline under. Sharing "main" makes hyperframes remap the host and wait 45s
+// for a registration that never arrives. Nothing else catches it: the official
+// linter only checks that the attribute is *present*, and the per-scene checks
+// never open index.html.
+
+test('a generated mount host is not reported as a collision', async () => {
+  // Regression guard: the host writeIndex generates uses the scene name. If
+  // that ever changed to "main", this check would fire on every healthy project.
+  const { byName, cleanup } = mount()
+  await byName.video_new_project.execute({ name: 'p', width: 1920, height: 1080, duration: 10 }, {})
+  const written = await byName.video_write_scene.execute({ project: 'p', scene: 'scene-01.html', html: GOOD_SCENE }, {})
+  assert.deepEqual(written.problems, [])
+  const listed = await byName.video_list_scenes.execute({ project: 'p' }, {})
+  assert.equal(listed.brokenCount, 0)
+  cleanup()
+})
+
+test('video_list_scenes flags a host that shares the scene\'s composition id', async () => {
+  const { byName, cleanup } = mount()
+  const created = await byName.video_new_project.execute({ name: 'p', width: 1920, height: 1080, duration: 10 }, {})
+  await byName.video_write_scene.execute({ project: 'p', scene: 'scene-01.html', html: GOOD_SCENE }, {})
+
+  // Stand in for a hand-edited index.html: the host is given the id the scene
+  // itself registers under, which is what the wrong instruction produces.
+  const indexPath = join(created.path, 'index.html')
+  const before = readFileSync(indexPath, 'utf8')
+  assert.match(before, /data-composition-id="scene-01"/, 'the generated host should use the scene name')
+  writeFileSync(indexPath, before.replace('data-composition-id="scene-01"', 'data-composition-id="main"'))
+
+  const out = await byName.video_list_scenes.execute({ project: 'p' }, {})
+  assert.equal(out.brokenCount, 1)
+  assert.match(out.scenes[0].problems.join('\n'), /same id the scene registers its timeline under/)
+  assert.match(out.scenes[0].problems.join('\n'), /scene-01\.html/, 'the message should name the scene')
+  cleanup()
+})
+
+test('a host missing its composition id is left to the linter', async () => {
+  // The plugin reports collisions only. An absent attribute is
+  // host_missing_composition_id, which the official lint already reports -- and
+  // there is nothing to collide with.
+  const { byName, cleanup } = mount()
+  const created = await byName.video_new_project.execute({ name: 'p', width: 1920, height: 1080, duration: 10 }, {})
+  await byName.video_write_scene.execute({ project: 'p', scene: 'scene-01.html', html: GOOD_SCENE }, {})
+
+  const indexPath = join(created.path, 'index.html')
+  const before = readFileSync(indexPath, 'utf8')
+  writeFileSync(indexPath, before.replace(' data-composition-id="scene-01"', ''))
+
+  const out = await byName.video_list_scenes.execute({ project: 'p' }, {})
+  assert.equal(out.brokenCount, 0)
+  cleanup()
+})
+
+test('a host pointing at a scene that is gone is skipped', async () => {
+  const { byName, cleanup } = mount()
+  const created = await byName.video_new_project.execute({ name: 'p', width: 1920, height: 1080, duration: 10 }, {})
+  const indexPath = join(created.path, 'index.html')
+  // The scaffold ships with one valid scene; point the entry document at a
+  // different scene that does not exist. There is nothing to read and nothing
+  // to collide with, so this must stay silent rather than throw.
+  writeFileSync(indexPath, '<div data-composition-id="main" data-composition-src="compositions/scene-99.html"></div>')
+
+  const out = await byName.video_list_scenes.execute({ project: 'p' }, {})
+  assert.equal(out.brokenCount, 0, 'a host whose scene is absent cannot collide with anything')
   cleanup()
 })
 
