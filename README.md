@@ -8,27 +8,49 @@
 （Chrome `beginFrame`），再交 FFmpeg 编码。所以慢机器只是渲染更久，**不会掉帧**，
 同输入必同输出。
 
+## 安装
+
+前置：**Node 20+**、**ffmpeg**、**Chrome headless shell**（后两个见下面「工具链」）。
+
+```bash
+git clone https://github.com/lxy/dsh-video-hyperframes.git
+cd dsh-video-hyperframes
+pnpm install          # link: 是 pnpm 语法，npm install 会报 EUNSUPPORTEDPROTOCOL
+```
+
+然后在**你的 dsh profile** 里（`$DSH_HOME/profiles/<profile>/`）声明依赖、
+挂工具行——细节见下面[「接入 dsh profile」](#接入-dsh-profile)。
+
+前置三件套：**Node 20+**、**ffmpeg**、**Chrome headless shell**
+（后两个见下面「三个实测到的坑」）。想先验证工具链，跑 `video_doctor`
+或 `video_env_check`——它们会直接告诉你缺什么、改哪。
+
 ## 七个工具
 
 | 工具 | 作用 |
 | --- | --- |
 | `video_env_check` | 报告 node / ffmpeg / hyperframes CLI / 项目根目录是否就绪 |
 | `video_new_project` | 建项目骨架：`hyperframes.json`、`meta.json`、`index.html`、`compositions/`、`assets/` |
-| `video_write_scene` | 写一个场景 HTML，并**当场做 5 类组合契约检查** |
+| `video_write_scene` | 写一个场景 HTML，并**当场做 9 类组合契约检查** |
 | `video_list_scenes` | 按数字序（不是字典序）列出场景与时序属性计数、契约违规数 |
 | `video_check` | 调官方 `hyperframes check`：lint + 运行时校验 + 无头 Chrome 布局检查 |
 | `video_doctor` | 调官方 `hyperframes doctor`：按 HyperFrames 自己的方式体检工具链 |
 | `video_render` | 调 `hyperframes render` 出 MP4，回传退出码、字节数、日志尾部 |
 
-`video_write_scene` 的契约检查是这个插件最有价值的部分——下面这 5 类错误在预览里
-几乎看不出来，但会直接毁掉成片：
+`video_write_scene` 的契约检查是这个插件最有价值的部分——下面这些错误在预览里
+几乎看不出来，但会直接毁掉成片。**第 9 条最阴险**：
 
-1. 根元素没有 `data-composition-id`
-2. 完全没有 `data-start` → 整段渲染成静止图
-3. `data-start` 与 `data-duration` 数量不等 → 缺 `data-duration` 的元素**永不退场**
-4. 有 `data-start` 但没挂 `class="clip"` → 该元素被渲染器忽略
-5. 用了 GSAP 却没注册 `window.__timelines[id]` → 渲染器找不到 timeline，动画不动
+1. 场景内容没包在 `<template>` 里
+2. 挂载宿主元素缺 `data-composition-id`，或缺自己的 `id`
+3. 根元素没有 `data-composition-id`（必须是 `"main"`，不是项目名）
+4. 完全没有 `data-start` → 整段渲染成静止图
+5. `data-start` 与 `data-duration` 数量不等 → 缺 `data-duration` 的元素**永不退场**
+6. 有 `data-start` 但没挂 `class="clip"` → 该元素被渲染器忽略
+7. 用了 GSAP 却没注册 `window.__timelines[id]` → 渲染器找不到 timeline，动画不动
    （只写 `paused: true` **不够**，它要按 composition id 查表）
+8. 时序元素没有 `id` → Studio 找不到稳定编辑目标
+9. **GSAP timeline 写在了场景文件里** → 渲染 `exit 0`、MP4 正常、linter 全绿，
+   但**每一帧都是同一张静止图**。任何静态检查都发现不了
 
 ## 组合契约
 
@@ -124,9 +146,9 @@ md5sum f*.png    # 全部相同 = timeline 没被 seek
 **时序元素还要有 `id`**（`studio_missing_editable_id`）。没有 `id`，Studio 的时间轴和
 画布控件找不到稳定编辑目标。
 
-## 安装
+## 接入 dsh profile
 
-profile 里声明（desktop profile 已配好）：
+profile 里声明：
 
 ```json
 {
@@ -171,6 +193,9 @@ profile 里声明（desktop profile 已配好）：
 
 `previewPort` 默认 **3002**（HyperFrames 自己的 preview server 默认值）。
 `link:` 是 pnpm 语法，用 `pnpm install` 装（`npm install` 会报 `EUNSUPPORTEDPROTOCOL`）。
+
+改完记得**重启 dsh**，然后**开新会话** —— preset 是会话级不可变的
+（`agent-preset/locked`），老会话不会变。产出落在会话工作目录的 `videos/` 下。
 
 CLI 装在独立目录，不进 profile 的依赖树：
 
