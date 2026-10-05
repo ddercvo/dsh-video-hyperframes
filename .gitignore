@@ -1,0 +1,19 @@
+node_modules/
+*.log
+
+# Test and render output
+videos/
+out/
+*.mp4
+framecheck/
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# lib/ is intentionally NOT ignored. It is a straight copy of src/ (see
+# scripts/build.mjs) but it is what package.json#exports points at, so a fresh
+# clone has to work without a build step. src/ stays the source of truth.

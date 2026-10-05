@@ -1,0 +1,49 @@
+{
+  "name": "dsh-tool-hyperframes",
+  "description": "Model-facing HyperFrames HTML-to-video tools for the DeepSeek Harness: create a project, write seekable scenes, render deterministically to MP4",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "lib/index.js",
+  "types": "lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lxy/dsh-video-hyperframes.git"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "hyperframes",
+    "video",
+    "animation",
+    "html-to-video"
+  ],
+  "files": [
+    "lib/index.js",
+    "lib/toolchain.js",
+    "lib/types/**/*.d.ts",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.4",
+    "@deepseek-ai/schemastery": "~3.18.4",
+    "@deepseek-ai/dsh-tools": "0.2.0-rc.2"
+  },
+  "devDependencies": {
+    "@deepseek-ai/schemastery": "~3.18.4"
+  }
+}
