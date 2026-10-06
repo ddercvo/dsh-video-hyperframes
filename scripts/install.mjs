@@ -6,6 +6,7 @@
  *   node scripts/install.mjs                  # default profile (desktop)
  *   node scripts/install.mjs --profile web    # a different profile
  *   node scripts/install.mjs --dry-run        # print the plan, change nothing
+ *   node scripts/install.mjs --force          # rewrite the patch block
  *   node scripts/install.mjs --uninstall      # remove it again
  *
  * All logic lives in scripts/lib/profile-install.mjs so it can be unit-tested
@@ -25,11 +26,14 @@ if (hasFlag('help') || hasFlag('h')) {
   console.log(`Register dsh-tool-hyperframes in a dsh profile.
 
 Usage:
-  node scripts/install.mjs [--profile <name>] [--dry-run] [--uninstall]
+  node scripts/install.mjs [--profile <name>] [--dry-run] [--force] [--uninstall]
 
 Options:
   --profile <name>   dsh profile to modify (default: desktop)
   --dry-run          print the plan without writing anything
+  --force            rewrite the plugin's patch block from the current template,
+                     even if one is already there. Use this to pick up a newer
+                     template; a plain re-run leaves an existing block untouched.
   --uninstall        remove the plugin's rows and dependency again
   --help             show this message
 
@@ -39,9 +43,10 @@ Both edited files are copied to <file>.bak-<timestamp> before being written.`)
 
 const uninstall = hasFlag('uninstall')
 const dryRun = hasFlag('dry-run')
+const force = hasFlag('force')
 const profile = flagValue('profile', 'desktop')
 
-const result = run({ profile, uninstall, dryRun, log: console.log })
+const result = run({ profile, uninstall, dryRun, force, log: console.log })
 
 if (!result.ok) {
   console.error(`\n✗ ${result.message}`)

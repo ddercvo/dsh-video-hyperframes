@@ -148,6 +148,69 @@ test('removeOwnBlock returns null rather than guessing at an unknown shape', () 
   assert.equal(removeOwnBlock('- id: unrelated\n  name: x\n'), null)
 })
 
+// --- --force: refreshing a profile installed from an older template --------------
+//
+// Without this the installer is a dead end for upgrades: it sees the rows, says
+// "already configured", and leaves the old block in place -- while sounding like
+// it just checked everything. The profile then keeps running stale instructions.
+
+/**
+ * A block from an earlier template: no markers, no preset, and `previewPort`
+ * set to a value the current template does not use, so a leftover is visible.
+ */
+const OLD_BLOCK = [
+  '- insert:',
+  '    - id: tool-hyperframes',
+  "      name: 'dsh-tool-hyperframes'",
+  '      config:',
+  '        previewPort: 9999',
+  '',
+].join('\n')
+
+test('a plain re-run leaves an existing block untouched', () => {
+  // Start from a package.json that is already set up -- otherwise `changed` is
+  // true for an unrelated reason (the dependency is missing) and the assertion
+  // would pass or fail on something this test is not about.
+  const setUp = planWith()
+  const plan = planWith({ pkgText: setUp.nextPackageJson, patchText: OLD_BLOCK })
+  assert.equal(plan.changed, false)
+  assert.equal(plan.nextPatch, OLD_BLOCK)
+})
+
+test('--force replaces an older block with the current template', () => {
+  const plan = planWith({ patchText: OLD_BLOCK, force: true })
+  assert.equal(plan.changed, true)
+  assert.match(plan.nextPatch, /# >>> dsh-tool-hyperframes >>>/, 'the marker the new template carries')
+  assert.match(plan.nextPatch, /preset-video/, 'the preset the old block lacked')
+  assert.match(plan.nextPatch, /# <<< dsh-tool-hyperframes <<</)
+  assert.equal(
+    plan.nextPatch.match(/^- insert:/gm).length,
+    1,
+    'the old block must be removed, not left alongside the new one',
+  )
+  assert.doesNotMatch(plan.nextPatch, /previewPort: 9999/, 'no leftovers from the old block')
+})
+
+test('--force preserves unrelated rows the user has in the file', () => {
+  const mine = '# mine\n- id: ui-settings-general\n  name: "@deepseek-ai/dsh-client-ui-settings-general"\n'
+  const plan = planWith({ patchText: `${mine}\n${OLD_BLOCK}`, force: true })
+  assert.ok(plan.nextPatch.startsWith(mine.trimEnd()), "the user's own rows stay first")
+  assert.equal(plan.nextPatch.match(/^- insert:/gm).length, 1)
+})
+
+test('--force on a profile with no block just installs it', () => {
+  const plan = planWith({ patchText: '', force: true })
+  assert.equal(plan.changed, true)
+  assert.equal(plan.nextPatch.match(/^- insert:/gm).length, 1)
+})
+
+test('--force does not duplicate the dependency or bundle entry', () => {
+  const first = planWith()
+  const forced = planWith({ pkgText: first.nextPackageJson, patchText: first.nextPatch, force: true })
+  const pkg = JSON.parse(forced.nextPackageJson)
+  assert.equal(pkg.dsh.profile.bundles.filter((b) => b === PLUGIN_NAME).length, 1)
+})
+
 test('bad JSON is reported, not thrown', () => {
   const plan = planWith({ pkgText: '{ not json' })
   assert.match(plan.error, /could not parse/)

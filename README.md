@@ -35,8 +35,14 @@ node scripts/install.mjs    # 注册进 dsh profile
 | --- | --- |
 | `--profile <name>` | 目标 profile，默认 `desktop` |
 | `--dry-run` | 只打印计划，不写任何文件 |
+| `--force` | **重写插件的 patch 块**（用当前模板），即使已经存在 |
 | `--uninstall` | 移除插件，还原两个文件 |
 | `--help` | 用法 |
+
+**升级用 `--force`**。直接重跑是幂等的 —— 它看到行还在就报
+「already configured」并且**什么都不做**，所以模板更新到不了已有 profile。
+`--force` 会把插件的块删掉重写（用户的其它配置不动），
+`package.json` 不受影响（依赖和 bundle 本来就是幂等的）。
 
 然后三步生效：
 

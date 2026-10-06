@@ -33,9 +33,16 @@ up to `<name>.bak-<timestamp>` first:
 
 `$DSH_HOME` defaults to `~/.dsh`; the profile defaults to `desktop`. Useful
 flags: `--profile <name>`, `--dry-run` (print the plan, write nothing),
-`--uninstall`, `--help`.
+`--force`, `--uninstall`, `--help`.
 
 To check whether it is already configured, run `--dry-run` and read the output.
+
+**Upgrading an existing install:** a plain re-run is idempotent — it sees the
+rows, reports "already configured", and changes nothing. If the user is
+updating a profile that was set up earlier and the plugin's instructions have
+moved on since, pass `--force` to rewrite the plugin's block from the current
+template. That leaves the user's other configured rows alone and does not touch
+`package.json`.
 
 ---
 

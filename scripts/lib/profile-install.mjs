@@ -110,7 +110,7 @@ export function removeOwnBlock(text) {
  * @returns next file contents plus a per-item description for the report
  */
 export function planProfileChange(state) {
-  const { pkgText, patchText, template, linkPath, uninstall } = state
+  const { pkgText, patchText, template, linkPath, uninstall, force } = state
 
   let pkg
   try {
@@ -136,25 +136,45 @@ export function planProfileChange(state) {
     if (!hadBundle) pkg.dsh.profile.bundles.push(PLUGIN_NAME)
   }
 
-  let nextPatch
+  let nextPatch = patchText
   let error
+
   if (uninstall) {
-    nextPatch = patchHasRows ? removeOwnBlock(patchText) : patchText
-    if (nextPatch === null) {
-      error = 'found the plugin rows but could not identify the block owning them; '
-        + 'remove them by hand — refusing to guess at the boundaries'
-      nextPatch = patchText
+    if (patchHasRows) {
+      const removed = removeOwnBlock(patchText)
+      if (removed === null) {
+        error = 'found the plugin rows but could not identify the block owning them; '
+          + 'remove them by hand — refusing to guess at the boundaries'
+      } else {
+        nextPatch = removed
+      }
     }
-  } else if (patchHasRows) {
+  } else if (patchHasRows && !force) {
+    // Leave an existing block alone unless asked. A re-run must not quietly
+    // rewrite rows the user may have edited -- or, worse, report "already
+    // configured" while an older template stays in place.
     nextPatch = patchText
   } else {
-    const separator = patchText.trim() === '' ? '' : '\n\n'
-    nextPatch = `${patchText.trimEnd()}${separator}${template.trimEnd()}\n`
+    // A fresh install, or --force replacing whatever is there with the current
+    // template. This is how a profile set up from an older template gets the
+    // new one without a round trip through --uninstall.
+    const base = patchHasRows ? removeOwnBlock(patchText) : patchText
+    if (base === null) {
+      error = 'found the plugin rows but could not identify the block to replace; '
+        + 'run without --force first, or remove the leftovers by hand'
+    } else {
+      const separator = base.trim() === '' ? '' : '\n\n'
+      nextPatch = `${base.trimEnd()}${separator}${template.trimEnd()}\n`
+    }
   }
 
-  const changed = uninstall
-    ? (hadDep || hadBundle || patchHasRows)
-    : (!hadDep || !hadBundle || !patchHasRows)
+  const changed = error
+    ? false
+    : uninstall
+      ? (hadDep || hadBundle || patchHasRows)
+      : force
+        ? true
+        : (!hadDep || !hadBundle || !patchHasRows)
 
   return {
     error,
@@ -185,7 +205,7 @@ export function backupFile(file, dryRun = false) {
  * @param options - `{ profile, uninstall, dryRun, dshHome, log }`
  * @returns `{ ok, code, ... }` — `ok: false` carries a `message` for the caller to print
  */
-export function run({ profile = 'desktop', uninstall = false, dryRun = false, dshHome, log = () => {} } = {}) {
+export function run({ profile = 'desktop', uninstall = false, dryRun = false, force = false, dshHome, log = () => {} } = {}) {
   const home = dshHome ?? defaultDshHome()
   const root = packageRoot()
   const paths = profilePaths(home, profile)
@@ -232,11 +252,12 @@ export function run({ profile = 'desktop', uninstall = false, dryRun = false, ds
     template,
     linkPath,
     uninstall,
+    force,
   })
 
   if (plan.error) return { ok: false, message: plan.error }
 
-  const mode = uninstall ? 'uninstall' : 'install'
+  const mode = uninstall ? 'uninstall' : (force && plan.patchHasRows) ? 'update' : 'install'
   log(`\ndsh-video-hyperframes — ${mode}${dryRun ? ' (dry run, nothing will be written)' : ''}`)
   log(`  profile              ${paths.dir}`)
   log(`  plugin root          ${root}\n`)
@@ -245,13 +266,22 @@ export function run({ profile = 'desktop', uninstall = false, dryRun = false, ds
     log(uninstall
       ? '  nothing to remove — the plugin is not registered in this profile.\n'
       : '  already configured — dependency, bundle and patch rows are all present.\n')
+    if (!uninstall) {
+      log('If you meant to refresh an older template in this profile, use --force.\n')
+    }
     return { ok: true, changed: false, mode }
   }
 
   const label = (present, absent, action) => (present ? absent : action)
   log(`  dependency           ${uninstall ? 'remove' : label(plan.hadDep, 'already present', `add ${PLUGIN_NAME}`)}`)
   log(`  bundle               ${uninstall ? 'remove' : label(plan.hadBundle, 'already listed', `append ${PLUGIN_NAME}`)}`)
-  log(`  patch rows           ${uninstall ? 'remove' : label(plan.patchHasRows, 'already present', `append ${OWNED_IDS.length} rows under - insert:`)}`)
+  if (uninstall) {
+    log(`  patch rows           remove`)
+  } else if (force && plan.patchHasRows) {
+    log(`  patch rows           replace with the current template`)
+  } else {
+    log(`  patch rows           ${label(plan.patchHasRows, 'already present', `append ${OWNED_IDS.length} rows under - insert:`)}`)
+  }
   log('')
 
   const backups = []
@@ -262,7 +292,11 @@ export function run({ profile = 'desktop', uninstall = false, dryRun = false, ds
   }
 
   log(dryRun ? '  [dry-run] no files were written' : `  wrote                package.json, cordis.patch.yml`)
-  log(backups.length ? `  backups              ${backups.map((b) => b.split(/[\\/]/).pop()).join(', ')}` : '  backups              (none — files did not exist)')
+  if (!dryRun) {
+    log(backups.length
+      ? `  backups              ${backups.map((b) => b.split(/[\\/]/).pop()).join(', ')}`
+      : '  backups              (none — the files did not exist)')
+  }
 
   return { ok: true, changed: true, mode, backups, paths }
 }
